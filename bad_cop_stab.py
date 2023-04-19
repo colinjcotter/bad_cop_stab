@@ -35,7 +35,7 @@ a = (
     - inner(dot(v, n), dot(u, n) - uhat)/eta*ds
     - inner(q, kappa*dot(p, J) +  div(u))*dx
     + inner(qhat('+'), jump(u, n))*dS
-    - inner(qhat, phat + dot(u, n))*ds
+    + inner(qhat, phat + dot(u, n))*ds
     + inner(vhat('+'), dot(u('+'), n('+')) - uhat('+'))/eta*dS
     + inner(-vhat('+'), dot(u('-'), n('-')) + uhat('+'))/eta*dS
     + inner(vhat, dot(u, n) - uhat)/eta*ds
