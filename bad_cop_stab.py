@@ -1,8 +1,8 @@
 from firedrake import *
 from firedrake.petsc import PETSc
 
-n = 1
-mesh = UnitSquareMesh(n, n)
+nx = 1
+mesh = UnitSquareMesh(nx, nx, reorder=False, distribution_parameters={"partition": False})
 
 degree = 1
 V = VectorFunctionSpace(mesh, "RT", degree, dim=2)
@@ -26,19 +26,16 @@ def jump(u, n):
 n = FacetNormal(mesh)
 
 a = (
-    inner(v, kappa*dot(u, J))*dx - inner(div(v), p)*dx 
-    + inner(jump(v, n), phat('+'))*dS
+    - inner(q, kappa*dot(p, J) +  div(u))*dx
+    + inner(v, kappa*dot(u, J))*dx - inner(div(v), p)*dx 
     + inner(jump(v, n), phat('+'))*dS
     + inner(dot(v,n), phat)*ds
-    - inner(dot(v('+'), n('+')), dot(u('+'), n('+')) - uhat('+'))/eta*dS
-    - inner(dot(v('-'), n('-')), dot(u('-'), n('-')) + uhat('+'))/eta*dS
-    - inner(dot(v, n), dot(u, n) - uhat)/eta*ds
-    - inner(q, kappa*dot(p, J) +  div(u))*dx
     + inner(qhat('+'), jump(u, n))*dS
-    + inner(qhat, phat + dot(u, n))*ds
-    + inner(vhat('+'), dot(u('+'), n('+')) - uhat('+'))/eta*dS
-    + inner(-vhat('+'), dot(u('-'), n('-')) + uhat('+'))/eta*dS
-    + inner(vhat, dot(u, n) - uhat)/eta*ds
+    + inner(qhat,dot(u, n))*ds
+    - inner(dot(v('+'), n('+')) - vhat('+'), dot(u('+'), n('+')) - uhat('+'))/eta*dS
+    - inner(dot(v('-'), n('-')) + vhat('+'), dot(u('-'), n('-')) + uhat('+'))/eta*dS
+    - inner(dot(v, n) - vhat, dot(u, n) - uhat)/eta*ds
+    + inner(qhat, phat)*ds
     )
 
 F = inner(f, q)*dx
