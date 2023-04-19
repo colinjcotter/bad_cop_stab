@@ -6,7 +6,7 @@ mesh = UnitSquareMesh(n, n)
 degree = 1
 V = VectorFunctionSpace(mesh, "RT", degree, dim=2)
 Q = VectorFunctionSpace(mesh, "DG", degree-1, dim=2)
-T = VectorFunctionSpace(mesh, "HDivTrace", degree-1, dim=2)
+T = VectorFunctionSpace(mesh, "HDiv Trace", degree-1, dim=2)
 eta = Constant(1.0)
 kappa = Constant(1.0)
 
