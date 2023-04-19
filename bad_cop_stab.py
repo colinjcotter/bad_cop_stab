@@ -20,12 +20,12 @@ v, q, vhat, qhat = TestFunctions(W)
 J = as_tensor([[0, -1], [0, 1]])
 
 a = (
-    inner(v, kappa*dot(u, J))*dx - div(v)*p*dx 
+    inner(v, kappa*dot(u, J))*dx - inner(div(v), p)*dx 
     + jump(v)*phat*dS - inner(dot(v,n), dot(u,n))*ds
     - inner(dot(v('+'), n('+')), dot(u('+'), n('+')) - uhat)/eta*dS
     - inner(dot(v('-'), n('-')), dot(u('-'), n('-')) + uhat)/eta*dS
     - inner(dot(v, n), dot(u, n) - uhat)/eta*ds
-    + inner(q, kappa*dot(div(u), J))*dx
+    + inner(q, dot(p, J) +  div(u))*dx
     + inner(qhat, jump(u, n))*dS - inner(qhat, phat)*ds
     + inner(vhat, dot(u('+'), n('+')) - uhat)/eta*dS
     + inner(-vhat, dot(u('-'), n('-')) + uhat)/eta*dS
