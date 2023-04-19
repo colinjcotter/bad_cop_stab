@@ -26,16 +26,16 @@ n = FacetNormal(mesh)
 
 a = (
     inner(v, kappa*dot(u, J))*dx - inner(div(v), p)*dx 
-    + inner(both(inner(v, n)), phat)*dS
+    + inner(both(dot(v, n)), phat)*dS
     - inner(dot(v,n), dot(u,n))*ds
     - inner(dot(v('+'), n('+')), dot(u('+'), n('+')) - uhat)/eta*dS
     - inner(dot(v('-'), n('-')), dot(u('-'), n('-')) + uhat)/eta*dS
     - inner(dot(v, n), dot(u, n) - uhat)/eta*ds
     + inner(q, dot(p, J) +  div(u))*dx
-    + inner(qhat, both(inner(u, n)))*dS - inner(qhat, phat)*ds
+    + inner(qhat, both(dot(u, n)))*dS - inner(qhat, phat)*ds
     + inner(vhat, dot(u('+'), n('+')) - uhat)/eta*dS
     + inner(-vhat, dot(u('-'), n('-')) + uhat)/eta*dS
-    + inner(dot(vhat, n), dot(u, n) - uhat)/eta*ds
+    + inner(vhat, dot(u, n) - uhat)/eta*ds
     )
 
 F = inner(f, q)*dS
