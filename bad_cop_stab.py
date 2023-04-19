@@ -17,7 +17,7 @@ W = V * Q * T * T
 u, p, uhat, phat = TrialFunctions(W)
 v, q, vhat, qhat = TestFunctions(W)
 
-J = as_tensor([0, -1], [0, 1])
+J = as_tensor([[0, -1], [0, 1]])
 
 a = (
     inner(v, kappa*dot(u, J))*dx - div(v)*p*dx 
