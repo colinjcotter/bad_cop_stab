@@ -1,7 +1,7 @@
 from firedrake import *
 
 n = 10
-mesh = UnitSquareMesh(n)
+mesh = UnitSquareMesh(n, n)
 
 degree = 1
 V = VectorFunctionSpace(mesh, "RT", degree, dim=2)
