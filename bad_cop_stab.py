@@ -1,11 +1,12 @@
 from firedrake import *
 from firedrake.petsc import PETSc
 
-nx = 1
+nx = 10
 mesh = UnitSquareMesh(nx, nx, reorder=False, distribution_parameters={"partition": False})
 
 degree = 1
-V = VectorFunctionSpace(mesh, "RT", degree, dim=2)
+Vele = BrokenElement(FiniteElement("RT", mesh.ufl_cell(), degree))
+V = VectorFunctionSpace(mesh, Vele, dim=2)
 Q = VectorFunctionSpace(mesh, "DG", degree-1, dim=2)
 T = VectorFunctionSpace(mesh, "HDiv Trace", degree-1, dim=2)
 eta = Constant(1.0)
@@ -18,7 +19,7 @@ W = V * Q * T * T
 u, p, uhat, phat = TrialFunctions(W)
 v, q, vhat, qhat = TestFunctions(W)
 
-J = as_tensor([[0, -1], [0, 1]])
+J = as_tensor([[0., -1.], [1., 0.]])
 
 def jump(u, n):
     return dot(u('+'), n('+')) + dot(u('-'), n('-'))
@@ -61,9 +62,15 @@ def chop(A, tol=1E-10):
     A.destroy()
     return B
 
-A = assemble(a)
-Amat = chop(A.petscmat)
-Amat.view()
-
+#from numpy import *
+#A = array(assemble(a).M.values)
+#import matplotlib.pyplot as pp
+#pp.pcolor(A)
+#pp.colorbar()
+#pp.show()
 w = Function(W)
-#solve(a==F, w, solver_parameters = params)
+solve(a==F, w, solver_parameters = params)
+
+u, p, uhat, phat = w.subfunctions
+
+File('helm.pvd').write(u, p)
