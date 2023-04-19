@@ -19,14 +19,20 @@ v, q, vhat, qhat = TestFunctions(W)
 
 J = as_tensor([[0, -1], [0, 1]])
 
+def both(u):
+    return u('+') + u('-')
+
+n = FacetNormal(mesh)
+
 a = (
     inner(v, kappa*dot(u, J))*dx - inner(div(v), p)*dx 
-    + jump(v)*phat*dS - inner(dot(v,n), dot(u,n))*ds
+    + inner(both(inner(v, n)), phat)*dS
+    - inner(dot(v,n), dot(u,n))*ds
     - inner(dot(v('+'), n('+')), dot(u('+'), n('+')) - uhat)/eta*dS
     - inner(dot(v('-'), n('-')), dot(u('-'), n('-')) + uhat)/eta*dS
     - inner(dot(v, n), dot(u, n) - uhat)/eta*ds
     + inner(q, dot(p, J) +  div(u))*dx
-    + inner(qhat, jump(u, n))*dS - inner(qhat, phat)*ds
+    + inner(qhat, both(inner(u, n)))*dS - inner(qhat, phat)*ds
     + inner(vhat, dot(u('+'), n('+')) - uhat)/eta*dS
     + inner(-vhat, dot(u('-'), n('-')) + uhat)/eta*dS
     + inner(dot(vhat, n), dot(u, n) - uhat)/eta*ds
