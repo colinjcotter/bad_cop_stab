@@ -8,15 +8,18 @@ degree = 1
 element = BrokenElement(FiniteElement("RT", cell=mesh.ufl_cell(), degree=degree))
 V = VectorFunctionSpace(mesh, element, dim=2)
 Q = VectorFunctionSpace(mesh, "DG", degree-1, dim=2)
-T = VectorFunctionSpace(mesh, "HDiv Trace", degree-1, dim=2)
-W = V * Q * T * T
+T = VectorFunctionSpace(mesh, "HDiv Trace", degree-1, dim=4)
+W = V * Q * T
 
-u, p, uhat, phat = TrialFunctions(W)
-v, q, vhat, qhat = TestFunctions(W)
-
+u, p, up_hat = TrialFunctions(W)
+v, q, vq_hat = TestFunctions(W)
+uhat = as_vector([up_hat[0], up_hat[1]])
+phat = as_vector([up_hat[2], up_hat[3]])
+vhat = as_vector([vq_hat[0], vq_hat[1]])
+qhat = as_vector([vq_hat[2], vq_hat[3]])
 
 eta = Constant(1.0)
-kappa = Constant(0.0)
+kappa = Constant(100.0)
 ikappa = kappa * Constant([[0, -1], [1, 0]])
 
 n = FacetNormal(mesh)
@@ -29,7 +32,6 @@ a1 = inner(v, dot(ikappa, u)) * dx - (inner(v_n('+') * (1/eta), u_n('+')) + inne
 a2 = -inner(q, dot(ikappa, p)) * dx
 a3 = -inner(vhat('+') * (1/eta), uhat('+')) * dS - inner(vhat * (1/eta), uhat) * ds
 a4 = inner(qhat, eta * phat) * ds
-a4 = 0
 
 
 # off-diagonal terms
@@ -54,7 +56,35 @@ w = Function(W, name="solution")
 for wsub, name in zip(w.subfunctions, ("u", "p")):
     wsub.rename(name)
 
-solve(a==F, w, bcs=bcs)
+
+
+factor = {
+    "pc_type": "lu",
+    "pc_factor_mat_solver_type": "petsc",
+}
+
+cparams = {
+    "ksp_monitor": None,
+    "ksp_type": "gmres",
+    "pc_type": "python",
+    "pc_python_type": "firedrake.ASMExtrudedStarPC",
+    "pc_star_mat_ordering_type": "metisnd",
+    "pc_star_construct_dim": 0,
+    "pc_star_sub_sub": factor, # the first sub is PCASM and second is subsolver
+}
+
+sparams = {
+    "ksp_type": "preonly",
+    "pc_type": "python",
+    "mat_type": "matfree",
+    "pc_python_type": "firedrake.SCPC",
+    "pc_sc_eliminate_fields": "0,1",
+    "condensed_field": cparams,
+}
+#solve(a==F, w, bcs=bcs)
+problem = LinearVariationalProblem(a, F, w)
+solver = LinearVariationalSolver(problem, solver_parameters=sparams)
+solver.solve()
 
 File("output/bad_cop_stab.pvd").write(*w.subfunctions[:2])
 
