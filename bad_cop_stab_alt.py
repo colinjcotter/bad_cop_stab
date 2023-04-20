@@ -19,7 +19,7 @@ vhat = as_vector([vq_hat[0], vq_hat[1]])
 qhat = as_vector([vq_hat[2], vq_hat[3]])
 
 eta = Constant(1.0)
-kappa = Constant(100.0)
+kappa = Constant(1.0)
 ikappa = kappa * Constant([[0, -1], [1, 0]])
 
 n = FacetNormal(mesh)
@@ -84,13 +84,17 @@ sparams = {
 #solve(a==F, w, bcs=bcs)
 problem = LinearVariationalProblem(a, F, w)
 solver = LinearVariationalSolver(problem, solver_parameters=sparams)
+
+
+print = PETSc.Sys.Print
+print("dim(W) = ", W.dim(), tuple(V.dim() for V in W))
+print("kappa =", float(kappa))
 solver.solve()
 
 File("output/bad_cop_stab.pvd").write(*w.subfunctions[:2])
 
 A = assemble(a)
 
-PETSc.Sys.Print(tuple(V.dim() for V in W))
 
 #from firedrake.preconditioners.hypre_ams import chop
 #Amat = A.petscmat
