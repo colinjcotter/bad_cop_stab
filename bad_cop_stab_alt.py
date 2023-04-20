@@ -67,7 +67,7 @@ cparams = {
     "ksp_monitor": None,
     "ksp_type": "gmres",
     "pc_type": "python",
-    "pc_python_type": "firedrake.ASMExtrudedStarPC",
+    "pc_python_type": "firedrake.ASMStarPC",
     "pc_star_mat_ordering_type": "metisnd",
     "pc_star_construct_dim": 0,
     "pc_star_sub_sub": factor, # the first sub is PCASM and second is subsolver
