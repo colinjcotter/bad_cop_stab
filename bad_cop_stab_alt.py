@@ -1,10 +1,20 @@
 from firedrake import *
 from firedrake.petsc import PETSc
 
-nx = 10
-mesh = UnitSquareMesh(nx, nx, reorder=False, distribution_parameters={"partition": False})
 
-degree = 1
+import argparse
+parser = argparse.ArgumentParser(description='Stabilised conforming Hdiv badcop')
+parser.add_argument('--kappa', type=float, default=1.0, help='kappa')
+parser.add_argument('--eta', type=float, default=1.0, help='eta')
+parser.add_argument('--damp', action="store_true", default=False, help='damp high frequencies')
+parser.add_argument('--nx', type=int, default=10, help='elements along each side')
+parser.add_argument('--degree', type=int, default=1, help='degree')
+args, _ = parser.parse_known_args()
+
+nx = args.nx
+mesh = UnitSquareMesh(nx, nx)
+
+degree = args.degree
 RT = FiniteElement("RT", cell=mesh.ufl_cell(), degree=degree)
 V = VectorFunctionSpace(mesh, BrokenElement(RT), dim=2)
 Q = VectorFunctionSpace(mesh, "DG", degree-1, dim=2)
@@ -16,35 +26,41 @@ v, q, vq_hat = TestFunctions(W)
 uhat, phat = up_hat[0], up_hat[1]
 vhat, qhat = vq_hat[0], vq_hat[1]
 
-eta = Constant(1.0)
-kappa = Constant(1.0)
+eta = Constant(args.eta)
+kappa = Constant(args.kappa)
 ikappa = kappa * Constant([[0, -1], [1, 0]])
 
 n = FacetNormal(mesh)
 u_n = dot(u, n)
 v_n = dot(v, n)
 
-both = lambda f: f('+') + f('-')
+def both(expr):
+    return expr('+') + expr('-')
 
-# diagonal terms
-a1 = inner(v, dot(ikappa, u)) * dx - both(inner(v_n / eta, u_n)) * dS - inner(v_n * (1/eta), u_n) * ds
-a2 = -inner(q, dot(ikappa, p)) * dx
-a3 = -inner(vhat('+') * (1/eta), uhat('+')) * dS - inner(vhat * (1/eta), uhat) * ds
-a4 = inner(qhat, eta * phat) * ds
+# usual diagonal terms
+a = (inner(v, dot(ikappa, u)) * dx
+     - inner(q, dot(ikappa, p)) * dx
+     + inner(qhat, eta * phat) * ds)
 
-# off-diagonal terms
+# usual divergence off-diagonal terms
 b = lambda q, u: -inner(q, div(u)) * dx
-c = lambda vhat, qhat, u_n: ( (inner(-vhat('-') / eta + qhat('-'), u_n('-'))
-                              + inner(vhat('+') / eta + qhat('+'), u_n('+'))) * dS
+a += b(q, u) + b(p, v)
+
+# constraint off-diagonal terms (with shifted Lagrange multiplier)
+c = lambda vhat, qhat, u_n: ( (inner(-vhat('-') + qhat('-'), u_n('-'))
+                               +inner(vhat('+') + qhat('+'), u_n('+')) ) * dS
                              + inner(vhat / eta + qhat, u_n) * ds)
-a = a1 + a2 + a3 + a4 + b(q, u) + b(p, v) + c(vhat, qhat, u_n) + c(uhat, phat, v_n)
+a += c(vhat, qhat, u_n) + c(uhat, phat, v_n)
 
-if False:
-    # damping term
-    du = u - uhat
-    dv = v - vhat
-    a += both(inner(dv, eta * du)) * dS + inner(dv, eta * du) * ds
+# stabilization diagonal terms
+a -= (inner(vhat('+'), uhat('+')) * dS + inner(vhat / eta, uhat) * ds
+      + both(inner(v_n, u_n)) * dS + inner(v_n / eta, u_n) * ds)
 
+if args.damp:
+    # damping diagonal terms
+    du = u_n - uhat
+    dv = v_n - vhat
+    a -= both(inner(dv, du)) * dS + inner(dv, eta * du) * ds
 
 f = Constant([1,0])
 F = inner(f, q)*dx
@@ -53,8 +69,6 @@ bcs = []
 w = Function(W, name="solution")
 for wsub, name in zip(w.subfunctions, ("u", "p")):
     wsub.rename(name)
-
-
 
 factor = {
     "pc_type": "lu",
