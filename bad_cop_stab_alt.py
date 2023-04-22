@@ -1,6 +1,6 @@
 from firedrake import *
 from firedrake.petsc import PETSc
-
+PETSc.Sys.popErrorHandler()
 
 import argparse
 parser = argparse.ArgumentParser(description='Stabilised conforming Hdiv badcop')
@@ -11,6 +11,7 @@ parser.add_argument('--damp', action="store_true", default=False, help='damp hig
 parser.add_argument('--complex', action="store_true", default=False, help='use complex mode')
 parser.add_argument('--quadrilateral', action="store_true", default=False, help='use tensor-product cells')
 parser.add_argument('--nx', type=int, default=10, help='elements along each side')
+parser.add_argument('--refine', type=int, default=0, help='level of refinement')
 parser.add_argument('--degree', type=int, default=1, help='degree')
 args, _ = parser.parse_known_args()
 
@@ -19,6 +20,8 @@ dist_params = {"overlap_type": (DistributedMeshOverlapType.VERTEX, 1),}
 
 nx = args.nx
 mesh = UnitSquareMesh(nx, nx, quadrilateral=args.quadrilateral, distribution_parameters=dist_params)
+mh = MeshHierarchy(mesh, args.refine)
+mesh = mh[-1]
 
 degree = args.degree
 cell = mesh.ufl_cell()
@@ -99,20 +102,30 @@ w = Function(W, name="solution")
 for wsub, name in zip(w.subfunctions, ("u", "p", "traces")):
     wsub.rename(name)
 
-factor = {
-    "pc_type": "lu",
-    "pc_factor_mat_solver_type": "petsc",
+gmg = lambda coarse, levels: {
+    "pc_type": "mg",
+    "mg_levels": levels,
+    "mg_coarse": coarse,
 }
 
-cparams = {
-    "ksp_monitor": None,
-    "ksp_type": "gmres",
-    "ksp_view_eigenvalues": None,
+factor = lambda solver="petsc": {
+    "pc_type": "lu",
+    "pc_factor_mat_solver_type": solver,
+}
+
+levels = {
+    "ksp_type": "chebyshev",
     "pc_type": "python",
     "pc_python_type": "firedrake.ASMStarPC",
     "pc_star_construct_dim": 0,
-    "pc_star_sub_sub": factor, # the first sub is PCASM and second is subsolver
+    "pc_star_sub_sub": factor("petsc"), # the first sub is PCASM and second is subsolver
 }
+
+cparams = gmg(factor("mumps"), levels) if args.refine else levels
+cparams.update({
+    "ksp_monitor": None,
+    "ksp_type": "gmres",
+})
 
 sparams = {
     "ksp_type": "preonly",
@@ -123,7 +136,7 @@ sparams = {
     "condensed_field": cparams,
 }
 problem = LinearVariationalProblem(a, F, w)
-solver = LinearVariationalSolver(problem, solver_parameters=sparams)
+solver = LinearVariationalSolver(problem, solver_parameters=sparams, options_prefix="")
 
 print = PETSc.Sys.Print
 print("dim(W) = ", W.dim(), tuple(V.dim() for V in W))
