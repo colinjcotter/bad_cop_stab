@@ -6,7 +6,7 @@ import argparse
 parser = argparse.ArgumentParser(description='Stabilised conforming Hdiv badcop')
 parser.add_argument('--kappa', type=float, default=1.0, help='kappa')
 parser.add_argument('--eta', type=float, default=1.0, help='eta')
-parser.add_argument('--cr', action="store_true", default=False, help='use Crosieux--Raviart instead of HDiv Trace')
+parser.add_argument('--cr', action="store_true", default=False, help='use Crouzeix--Raviart instead of HDiv Trace')
 parser.add_argument('--damp', action="store_true", default=False, help='damp high frequencies')
 parser.add_argument('--complex', action="store_true", default=False, help='use complex mode')
 parser.add_argument('--quadrilateral', action="store_true", default=False, help='use tensor-product cells')
@@ -27,19 +27,19 @@ is_simplex = cell.is_simplex()
 RT = FiniteElement("RT" if is_simplex else "RTCF", cell=cell, degree=degree)
 DG = FiniteElement("DG" if is_simplex else "DQ", cell=cell, degree=degree-1)
 if args.cr:
-    HDivT = FiniteElement("CR", cell=cell, degree=degree)
+    T = FiniteElement("CR", cell=cell, degree=degree)
 else:
-    HDivT = FiniteElement("HDiv Trace", cell=cell, degree=degree-1)
+    T = FiniteElement("HDiv Trace", cell=cell, degree=degree-1)
 
 BrokenRT = BrokenElement(RT)
 if complex_mode:
     j = Constant(1j)
-    T = VectorElement(HDivT, dim=2)
+    T = VectorElement(T, dim=2)
 else:
     j = Constant([[0, -1], [1, 0]])
     BrokenRT = VectorElement(BrokenRT, dim=2)
     DG = VectorElement(DG, dim=2)
-    T = TensorElement(HDivT, shape=(2, 2))
+    T = TensorElement(T, shape=(2, 2))
 
 W = FunctionSpace(mesh, MixedElement([BrokenRT, DG, T]))
 u, p, up_hat = TrialFunctions(W)
