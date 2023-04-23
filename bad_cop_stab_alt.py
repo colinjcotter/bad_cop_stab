@@ -1,13 +1,13 @@
 from firedrake import *
 from firedrake.petsc import PETSc
 PETSc.Sys.popErrorHandler()
+print = PETSc.Sys.Print
 
 import argparse
 parser = argparse.ArgumentParser(description='Stabilised conforming Hdiv badcop')
 parser.add_argument('--kappa', type=float, default=1.0, help='kappa')
 parser.add_argument('--eta', type=float, default=1.0, help='eta')
 parser.add_argument('--cr', action="store_true", default=False, help='use Crouzeix--Raviart instead of HDiv Trace')
-parser.add_argument('--damp', action="store_true", default=False, help='damp high frequencies')
 parser.add_argument('--complex', action="store_true", default=False, help='use complex mode')
 parser.add_argument('--quadrilateral', action="store_true", default=False, help='use tensor-product cells')
 parser.add_argument('--nx', type=int, default=10, help='elements along each side')
@@ -47,18 +47,16 @@ else:
 W = FunctionSpace(mesh, MixedElement([BrokenRT, DG, T]))
 u, p, up_hat = TrialFunctions(W)
 v, q, vq_hat = TestFunctions(W)
+uhat, phat = up_hat[0], up_hat[1]
+vhat, qhat = vq_hat[0], vq_hat[1]
 
 n = FacetNormal(mesh)
 u_n = dot(u, n)
 v_n = dot(v, n)
 
-uhat, phat = up_hat[0], up_hat[1]
-vhat, qhat = vq_hat[0], vq_hat[1]
-
 eta = Constant(args.eta)
 kappa = Constant(args.kappa)
 ikappa = kappa * j
-inv_eta = 1 / eta
 
 def minus(expr):
     return expr('-')
@@ -69,31 +67,29 @@ def plus(expr):
 def both(expr):
     return expr('+') + expr('-')
 
+dx0 = dx(degree=2*degree+1)
+dx1 = dx(degree=2*degree-1)
+ds = ds(degree=2*degree-1)
+dS = dS(degree=2*degree-1)
+
 # usual diagonal terms
-a = (- inner(v, ikappa * u) * dx
-     + inner(q, ikappa * p) * dx
+a = (- inner(v, ikappa * u) * dx0
+     + inner(q, ikappa * p) * dx1
      - inner(qhat, eta * phat) * ds)
 
 # usual divergence off-diagonal terms
-a += (inner(q, div(u)) + inner(div(v), p)) * dx
+a += (inner(q, div(u)) + inner(div(v), p)) * dx1
 
-# constraint off-diagonal terms (with shifted Lagrange multiplier)
-c = lambda vhat, qhat, u_n: ((minus(inner(qhat - vhat, u_n))
-                              + plus(inner(qhat + vhat, u_n))) * dS
-                             + inner(qhat + inv_eta * vhat, u_n) * ds)
+# usual constraint off-diagonal terms
+c = lambda qhat, u_n: both(inner(qhat, u_n)) * dS + inner(qhat, u_n) * ds
+a -= c(qhat, u_n) + c(phat, v_n)
 
-a -= c(vhat, qhat, u_n) + c(uhat, phat, v_n)
+# stabilization terms
+a += ((minus(inner(v_n + vhat, u_n + uhat))
+       + plus(inner(v_n - vhat, u_n - uhat))) * dS
+      + inner(v_n - vhat, (1/eta) * (u_n - uhat)) * ds)
 
-# stabilization diagonal terms
-a += both(inner(v_n, u_n)) * dS + inner(inv_eta * v_n, u_n) * ds
-a += plus(inner(vhat, uhat)) * dS + inner(inv_eta * vhat, uhat) * ds
-
-if args.damp:
-    # damping diagonal terms
-    du = u_n - uhat
-    dv = v_n - vhat
-    a += both(inner(dv, du)) * dS + inner(dv, eta * du) * ds
-
+# Right-hand side
 f = Constant(1 if complex_mode else [1, 0])
 F = inner(q, f) * dx
 bcs = []
@@ -123,6 +119,7 @@ levels = {
 
 cparams = gmg(factor("mumps"), levels) if args.refine else levels
 cparams.update({
+    "mat_type": "aij",
     "ksp_monitor": None,
     "ksp_type": "gmres",
 })
@@ -138,16 +135,7 @@ sparams = {
 problem = LinearVariationalProblem(a, F, w)
 solver = LinearVariationalSolver(problem, solver_parameters=sparams, options_prefix="")
 
-print = PETSc.Sys.Print
 print("dim(W) = ", W.dim(), tuple(V.dim() for V in W))
 print("kappa =", float(kappa))
 solver.solve()
-
 File("output/bad_cop_stab.pvd").write(*w.subfunctions[:2])
-
-#from firedrake.preconditioners.hypre_ams import chop
-#A = assemble(a)
-#Amat = A.petscmat
-#Amat = Amat.convert("seqaij")
-#Bmat = chop(Amat)
-#Bmat.view()
