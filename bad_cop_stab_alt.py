@@ -81,7 +81,7 @@ if len(W) == 3:
 else:
     u, up_hat = TrialFunctions(W)
     v, vq_hat = TestFunctions(W)
-    # these are off by a factor of i
+    # these are off by a factor of i, but compensated below by flipping a sign
     p = div(u) / kappa
     q = div(v) / kappa
 
@@ -151,6 +151,7 @@ levels = {
     "pc_type": "python",
     "pc_python_type": "firedrake.ASMStarPC",
     "pc_star_construct_dim": 0,
+    #"pc_star_backend": "tinyasm",
     "pc_star_sub_sub": factor("petsc"), # the first sub is PCASM and second is subsolver
 }
 
@@ -159,6 +160,8 @@ cparams.update({
     "mat_type": "aij",
     "ksp_monitor": None,
     "ksp_type": "gmres",
+    "ksp_pc_side": "right",
+    "ksp_norm_type": "unpreconditioned",
 })
 
 sparams = {
@@ -170,7 +173,7 @@ sparams = {
     "condensed_field": cparams,
 }
 
-problem = LinearVariationalProblem(a, F, w)
+problem = LinearVariationalProblem(a, F, w, bcs=bcs)
 solver = LinearVariationalSolver(problem, solver_parameters=sparams, options_prefix="")
 
 print("dim(W) =", W.dim(), tuple(V.dim() for V in W))
