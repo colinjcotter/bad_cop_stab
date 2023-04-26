@@ -86,8 +86,14 @@ else:
     q = div(v) / kappa
 
 if stab:
-    uhat, phat = up_hat[0], up_hat[1]
-    vhat, qhat = vq_hat[0], vq_hat[1]
+    if up_hat.ufl_shape[0] == 2:
+        uhat, phat = up_hat[0], up_hat[1]
+        vhat, qhat = vq_hat[0], vq_hat[1]
+    elif up_hat.ufl_shape[0] == 4:
+        _up_hat = tuple(up_hat[i] for i in range(4))
+        _vq_hat = tuple(vq_hat[i] for i in range(4))
+        uhat, phat = as_vector(_up_hat[0:2]), as_vector(_up_hat[2:4])
+        vhat, qhat = as_vector(_vq_hat[0:2]), as_vector(_vq_hat[2:4])
 else:
     phat = up_hat
     qhat = vq_hat
@@ -126,9 +132,10 @@ a -= both(inner(phat, v_n)) * dS1 + inner(phat, v_n) * ds1
 
 # stabilization terms
 if stab:
-    a += ((minus(inner(v_n + vhat, u_n + uhat))
-           +plus(inner(v_n - vhat, u_n - uhat))) * dS1
-          + inner(v_n - vhat, (1/eta) * (u_n - uhat)) * ds1)
+    penalty = sqrt(kappa)
+    a += penalty*((minus(inner(v_n + vhat, u_n + uhat))
+                   +plus(inner(v_n - vhat, u_n - uhat))) * dS1
+                  + inner(v_n - vhat, (1/eta) * (u_n - uhat)) * ds1)
 
 # Right-hand side
 f = Constant(1 if complex_mode else [1, 0], domain=mesh)
@@ -148,6 +155,7 @@ factor = lambda solver="petsc": {
 
 levels = {
     "ksp_type": "chebyshev",
+    "ksp_chebyshev_kind": "fourth",
     "pc_type": "python",
     "pc_python_type": "firedrake.ASMStarPC",
     "pc_star_construct_dim": 0,
