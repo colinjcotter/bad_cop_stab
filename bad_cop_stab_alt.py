@@ -43,9 +43,9 @@ else:
 RT = FiniteElement(rt_family, cell=cell, degree=degree)
 DG = FiniteElement(dg_family, cell=cell, degree=degree-1)
 if args.cr:
-    T = FiniteElement("CR", cell=cell, degree=degree)
+    T = FiniteElement("CR", cell=cell, degree=RT.degree())["facet"]
 else:
-    T = FiniteElement("HDiv Trace", cell=cell, degree=degree-1)
+    T = FiniteElement("HDiv Trace", cell=cell, degree=DG.degree())
 
 BrokenRT = BrokenElement(RT)
 if complex_mode:
@@ -117,6 +117,8 @@ ds1 = ds(degree=2*degree-1, domain=mesh)
 dS1 = dS(degree=2*degree-1, domain=mesh)
 
 ikappa = kappa * j
+ikappa_inv = -ikappa / (kappa**2)
+
 # usual diagonal terms
 a = (- inner(v, ikappa * u) * dx0
      + inner(q, ikappa * p) * dx1
@@ -131,16 +133,41 @@ a -= both(inner(qhat, u_n)) * dS1 + inner(qhat, u_n) * ds1
 a -= both(inner(phat, v_n)) * dS1 + inner(phat, v_n) * ds1
 
 # stabilization terms
+bcs = []
 if stab:
     penalty = sqrt(kappa)
-    a += penalty*((minus(inner(v_n + vhat, u_n + uhat))
-                   +plus(inner(v_n - vhat, u_n - uhat))) * dS1
-                  + inner(v_n - vhat, (1/eta) * (u_n - uhat)) * ds1)
+    # penalty = Constant(1)
+
+    v_plus = v_n + vhat
+    u_plus = u_n + uhat
+
+    v_minus = v_n - vhat
+    u_minus = u_n - uhat
+
+    a += penalty*( minus(inner(v_plus, u_plus))*dS1
+                  + plus(inner(v_minus, u_minus))*dS1
+                  + inner(v_minus, (1/eta) * u_minus) * ds1)
+
 
 # Right-hand side
 f = Constant(1 if complex_mode else [1, 0], domain=mesh)
-F = inner(q, f) * dx1
-bcs = []
+g = zero(qhat.ufl_shape)
+
+
+x = SpatialCoordinate(mesh)
+omega = [Constant(2*pi, domain=mesh) for _ in x]
+p_exact = Constant(1 if complex_mode else [1,0], domain=mesh) * (x[0]*(1-x[0]) * x[1]*(1-x[1])/0.5**4)**2
+
+u_exact = None
+# p_exact = None
+if p_exact:
+    u_exact = (ikappa / kappa**2) * grad(p_exact)
+    f = ikappa * p_exact + div(u_exact)
+    g = eta * p_exact + dot(u_exact, n)
+
+if len(W) == 2:
+    f = j * f
+F = inner(q, f) * dx1 + inner(qhat, -g) * ds1
 
 gmg = lambda coarse, levels: {
     "pc_type": "mg",
@@ -159,11 +186,12 @@ levels = {
     "pc_type": "python",
     "pc_python_type": "firedrake.ASMStarPC",
     "pc_star_construct_dim": 0,
-    #"pc_star_backend": "tinyasm",
+    "pc_star_backend": "tinyasm",
     "pc_star_sub_sub": factor("petsc"), # the first sub is PCASM and second is subsolver
 }
 
-cparams = gmg(factor("mumps"), levels) if args.refine else levels
+cparams = factor("mumps")
+cparams = gmg(cparams, levels) if args.refine else levels
 cparams.update({
     "mat_type": "aij",
     "ksp_monitor": None,
@@ -187,5 +215,14 @@ solver = LinearVariationalSolver(problem, solver_parameters=sparams, options_pre
 print("dim(W) =", W.dim(), tuple(V.dim() for V in W))
 print("kappa =", float(kappa))
 solver.solve()
+
+
+if p_exact:
+    uh = w.subfunctions[0]
+    ph = w.subfunctions[1] if len(W) == 3 else ikappa_inv * (f - div(uh))
+    u_diff = uh - u_exact
+    p_diff = ph - p_exact
+    error = sqrt(assemble(inner(u_diff, u_diff)*dx + inner(p_diff, p_diff)*dx))
+    print("error", error)
 
 File("output/bad_cop_stab.pvd").write(*w.subfunctions[:-1])
