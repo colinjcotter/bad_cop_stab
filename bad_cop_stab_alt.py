@@ -9,6 +9,7 @@ parser.add_argument('--kappa', type=float, default=1.0, help='kappa')
 parser.add_argument('--eta', type=float, default=1.0, help='eta')
 parser.add_argument('--cr', action="store_true", default=False, help='use Crouzeix--Raviart instead of HDiv Trace')
 parser.add_argument('--no-stab', dest="stab", action="store_false", default=True, help='do not use stablization')
+parser.add_argument('--no-slate', dest="slate", action="store_false", default=True, help='do not use slate')
 parser.add_argument('--no-pressure', dest="pressure", action="store_false", default=True, help='eliminate pressure')
 parser.add_argument('--complex', action="store_true", default=False, help='use complex mode')
 parser.add_argument('--quadrilateral', action="store_true", default=False, help='use tensor-product cells')
@@ -20,6 +21,7 @@ args, _ = parser.parse_known_args()
 stab = args.stab
 pressure = args.pressure
 complex_mode = args.complex
+use_slate = args.slate
 dist_params = {"overlap_type": (DistributedMeshOverlapType.VERTEX, 1),}
 
 nx = args.nx
@@ -49,11 +51,11 @@ else:
 
 BrokenRT = BrokenElement(RT)
 if complex_mode:
-    j = Constant(1j, domain=mesh)
+    j = 1j
     if stab:
         T = VectorElement(T, dim=2)
 else:
-    j = Constant([[0, -1], [1, 0]], domain=mesh)
+    j = as_tensor([[0, -1], [1, 0]])
     BrokenRT = VectorElement(BrokenRT, dim=2)
     DG = VectorElement(DG, dim=2)
     if stab:
@@ -98,9 +100,13 @@ else:
     phat = up_hat
     qhat = vq_hat
 
-n = FacetNormal(mesh)
-u_n = dot(u, n)
-v_n = dot(v, n)
+if not complex_mode:
+    C = diag(as_vector([1, -1]))
+    if stab:
+        vhat = C * vhat
+    qhat = C * qhat
+    v = C * v
+    q = C * q
 
 def minus(expr):
     return expr('-')
@@ -111,13 +117,16 @@ def plus(expr):
 def both(expr):
     return expr('+') + expr('-')
 
+n = FacetNormal(mesh)
+u_n = dot(u, n)
+v_n = dot(v, n)
+
 dx0 = dx(degree=2*degree+1, domain=mesh)
 dx1 = dx(degree=2*degree-1, domain=mesh)
 ds1 = ds(degree=2*degree-1, domain=mesh)
 dS1 = dS(degree=2*degree-1, domain=mesh)
 
 ikappa = kappa * j
-ikappa_inv = -ikappa / (kappa**2)
 
 # usual diagonal terms
 a = (- inner(v, ikappa * u) * dx0
@@ -133,26 +142,18 @@ a -= both(inner(qhat, u_n)) * dS1 + inner(qhat, u_n) * ds1
 a -= both(inner(phat, v_n)) * dS1 + inner(phat, v_n) * ds1
 
 # stabilization terms
-bcs = []
 if stab:
-    penalty = sqrt(kappa)
-    # penalty = Constant(1)
-
-    v_plus = v_n + vhat
-    u_plus = u_n + uhat
-
-    v_minus = v_n - vhat
-    u_minus = u_n - uhat
-
-    a += penalty*( minus(inner(v_plus, u_plus))*dS1
-                  + plus(inner(v_minus, u_minus))*dS1
-                  + inner(v_minus, (1/eta) * u_minus) * ds1)
-
+    v_plus = vhat + v_n
+    u_plus = uhat + u_n
+    v_minus = vhat - v_n
+    u_minus = uhat - u_n
+    a += ((minus(inner(v_plus, u_plus))
+          + plus(inner(v_minus, u_minus))) * dS1
+          + inner(v_minus, (1/eta) * u_minus) * ds1)
 
 # Right-hand side
 f = Constant(1 if complex_mode else [1, 0], domain=mesh)
 g = zero(qhat.ufl_shape)
-
 
 x = SpatialCoordinate(mesh)
 omega = [Constant(2*pi, domain=mesh) for _ in x]
@@ -167,7 +168,8 @@ if p_exact:
 
 if len(W) == 2:
     f = j * f
-F = inner(q, f) * dx1 + inner(qhat, -g) * ds1
+F = inner(q, f) * dx1 - inner(qhat, g) * ds1
+bcs = []
 
 gmg = lambda coarse, levels: {
     "pc_type": "mg",
@@ -176,38 +178,48 @@ gmg = lambda coarse, levels: {
 }
 
 factor = lambda solver="petsc": {
-    "pc_type": "lu",
+    "pc_type": "cholesky",
     "pc_factor_mat_solver_type": solver,
 }
+
+if use_slate:
+    asmpc = "ASMStarPC"
+    prefix = "star"
+else:
+    asmpc = "ASMVankaPC"
+    prefix = "vanka"
 
 levels = {
     "ksp_type": "chebyshev",
     "ksp_chebyshev_kind": "fourth",
     "pc_type": "python",
-    "pc_python_type": "firedrake.ASMStarPC",
-    "pc_star_construct_dim": 0,
-    "pc_star_backend": "tinyasm",
-    "pc_star_sub_sub": factor("petsc"), # the first sub is PCASM and second is subsolver
+    "pc_python_type": "firedrake.%s" % asmpc,
+    "pc_%s_construct_dim" % prefix: 0,
+    "pc_%s_backend" % prefix: "tinyasm",
 }
 
-cparams = factor("mumps")
-cparams = gmg(cparams, levels) if args.refine else levels
-cparams.update({
+sparams = factor("mumps")
+sparams = gmg(sparams, levels) if args.refine else levels
+
+sparams.update({
     "mat_type": "aij",
     "ksp_monitor": None,
+    "ksp_view_eigenvalues": None,
     "ksp_type": "gmres",
     "ksp_pc_side": "right",
     "ksp_norm_type": "unpreconditioned",
 })
 
-sparams = {
-    "ksp_type": "preonly",
-    "pc_type": "python",
-    "mat_type": "matfree",
-    "pc_python_type": "firedrake.SCPC",
-    "pc_sc_eliminate_fields": ",".join(map(str, range(len(W)-1))),
-    "condensed_field": cparams,
-}
+if use_slate:
+    sparams = {
+        "ksp_type": "preonly",
+        "snes_monitor": None,
+        "pc_type": "python",
+        "mat_type": "matfree",
+        "pc_python_type": "firedrake.SCPC",
+        "pc_sc_eliminate_fields": ",".join(map(str, range(len(W)-1))),
+        "condensed_field": sparams,
+    }
 
 problem = LinearVariationalProblem(a, F, w, bcs=bcs)
 solver = LinearVariationalSolver(problem, solver_parameters=sparams, options_prefix="")
@@ -216,13 +228,18 @@ print("dim(W) =", W.dim(), tuple(V.dim() for V in W))
 print("kappa =", float(kappa))
 solver.solve()
 
+uh = w.subfunctions[0]
+if len(W) == 3:
+    ph = w.subfunctions[1]
+else:
+    Q = FunctionSpace(mesh, DG)
+    ph = Function(Q, name="p")
+    ph.interpolate((ikappa*div(uh) - kappa*f)/kappa**2)
 
 if p_exact:
-    uh = w.subfunctions[0]
-    ph = w.subfunctions[1] if len(W) == 3 else ikappa_inv * (f - div(uh))
     u_diff = uh - u_exact
     p_diff = ph - p_exact
-    error = sqrt(assemble(inner(u_diff, u_diff)*dx + inner(p_diff, p_diff)*dx))
+    error = sqrt(assemble(inner(u_diff, u_diff)*dx0 + inner(p_diff, p_diff)*dx1))
     print("error", error)
 
-File("output/bad_cop_stab.pvd").write(*w.subfunctions[:-1])
+File("output/bad_cop_stab.pvd").write(uh, ph)
