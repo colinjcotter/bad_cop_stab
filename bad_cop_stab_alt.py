@@ -47,7 +47,9 @@ else:
 RT = FiniteElement(rt_family, cell=cell, degree=degree)
 DG = FiniteElement(dg_family, cell=cell, degree=degree-1)
 if args.cr:
-    T = FiniteElement("CR", cell=cell, degree=RT.degree())["facet"]
+    T = FiniteElement("CR", cell=cell, degree=RT.degree())
+    if T.degree() != 1:
+        T = T["facet"]
 else:
     T = FiniteElement("HDiv Trace", cell=cell, degree=DG.degree())
 
@@ -183,20 +185,13 @@ factor = lambda solver="petsc": {
     "pc_factor_mat_solver_type": solver,
 }
 
-if use_slate:
-    asmpc = "ASMStarPC"
-    prefix = "star"
-else:
-    asmpc = "ASMVankaPC"
-    prefix = "vanka"
-
 levels = {
     "ksp_type": "chebyshev",
     "ksp_chebyshev_kind": "fourth",
     "pc_type": "python",
-    "pc_python_type": "firedrake.%s" % asmpc,
-    "pc_%s_construct_dim" % prefix: 0,
-    "pc_%s_backend" % prefix: "tinyasm",
+    "pc_python_type": "firedrake.ASMStarPC",
+    "pc_star_construct_dim": 0,
+    "pc_star_backend": "tinyasm",
 }
 
 sparams = factor("mumps")
