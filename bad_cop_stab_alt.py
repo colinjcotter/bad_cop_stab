@@ -9,6 +9,7 @@ parser.add_argument('--kappa', type=float, default=1.0, help='kappa')
 parser.add_argument('--eta', type=float, default=1.0, help='eta')
 parser.add_argument('--cr', action="store_true", default=False, help='use Crouzeix--Raviart instead of HDiv Trace')
 parser.add_argument('--no-stab', dest="stab", action="store_false", default=True, help='do not use stablization')
+parser.add_argument('--no-mg', dest="mg", action="store_false", default=True, help='do not use multigrid')
 parser.add_argument('--no-slate', dest="slate", action="store_false", default=True, help='do not use slate')
 parser.add_argument('--no-pressure', dest="pressure", action="store_false", default=True, help='eliminate pressure')
 parser.add_argument('--complex', action="store_true", default=False, help='use complex mode')
@@ -21,6 +22,7 @@ args, _ = parser.parse_known_args()
 stab = args.stab
 pressure = args.pressure
 complex_mode = args.complex
+use_mg = args.mg
 use_slate = args.slate
 dist_params = {"overlap_type": (DistributedMeshOverlapType.VERTEX, 1),}
 
@@ -101,18 +103,13 @@ else:
     qhat = vq_hat
 
 if not complex_mode:
+    # Complex conjugate the test functions
     C = diag(as_vector([1, -1]))
     if stab:
         vhat = C * vhat
     qhat = C * qhat
     v = C * v
     q = C * q
-
-def minus(expr):
-    return expr('-')
-
-def plus(expr):
-    return expr('+')
 
 def both(expr):
     return expr('+') + expr('-')
@@ -143,12 +140,16 @@ a -= both(inner(phat, v_n)) * dS1 + inner(phat, v_n) * ds1
 
 # stabilization terms
 if stab:
-    v_plus = vhat + v_n
-    u_plus = uhat + u_n
-    v_minus = vhat - v_n
-    u_minus = uhat - u_n
-    a += ((minus(inner(v_plus, u_plus))
-          + plus(inner(v_minus, u_minus))) * dS1
+    r = [Function(FunctionSpace(m, "RT", 1)) for m in mh]
+    for ri in r:
+        ri.assign(1)
+    for k in range(1, len(r)):
+        r[k]._coarse = r[k-1]
+
+    s = dot(r[-1], n)
+    v_minus = v_n - s * vhat
+    u_minus = u_n - s * uhat
+    a += (both(inner(v_minus, u_minus)) * dS1
           + inner(v_minus, (1/eta) * u_minus) * ds1)
 
 # Right-hand side
@@ -199,7 +200,8 @@ levels = {
 }
 
 sparams = factor("mumps")
-sparams = gmg(sparams, levels) if args.refine else levels
+if use_mg:
+    sparams = gmg(sparams, levels) if args.refine else levels
 
 sparams.update({
     "mat_type": "aij",
@@ -239,7 +241,7 @@ else:
 if p_exact:
     u_diff = uh - u_exact
     p_diff = ph - p_exact
-    error = sqrt(assemble(inner(u_diff, u_diff)*dx0 + inner(p_diff, p_diff)*dx1))
+    error = sqrt(assemble(inner(u_diff, u_diff) * dx0 + inner(p_diff, p_diff) * dx1))
     print("error", error)
 
 File("output/bad_cop_stab.pvd").write(uh, ph)
