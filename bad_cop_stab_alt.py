@@ -30,6 +30,7 @@ nx = args.nx
 mesh = UnitSquareMesh(nx, nx, quadrilateral=args.quadrilateral, distribution_parameters=dist_params)
 mh = MeshHierarchy(mesh, args.refine)
 mesh = mh[-1]
+transfer = TransferManager()
 
 eta = Constant(args.eta, domain=mesh)
 kappa = Constant(args.kappa, domain=mesh)
@@ -104,7 +105,7 @@ else:
     phat = up_hat
     qhat = vq_hat
 
-if not complex_mode:
+if not complex_mode and False:
     # Complex conjugate the test functions
     C = diag(as_vector([1, -1]))
     if stab:
@@ -142,17 +143,15 @@ a -= both(inner(phat, v_n)) * dS1 + inner(phat, v_n) * ds1
 
 # stabilization terms
 if stab:
-    r = [Function(FunctionSpace(m, "RT", 1)) for m in mh]
-    for ri in r:
-        ri.assign(1)
+    r = [Function(FunctionSpace(m, "RT", 1)).assign(1) for m in mh]
     for k in range(1, len(r)):
+        transfer.prolong(r[k-1], r[k])
         r[k]._coarse = r[k-1]
 
     s = dot(r[-1], n)
-    v_minus = v_n - s * vhat
-    u_minus = u_n - s * uhat
-    a += (both(inner(v_minus, u_minus)) * dS1
-          + inner(v_minus, (1/eta) * u_minus) * ds1)
+    v_jump = v_n - s * vhat
+    u_jump = u_n - s * uhat
+    a += both(inner(v_jump, u_jump)) * dS1 + inner(v_jump, (1/eta) * u_jump) * ds1
 
 # Right-hand side
 f = Constant(1 if complex_mode else [1, 0], domain=mesh)
@@ -188,6 +187,7 @@ factor = lambda solver="petsc": {
 levels = {
     "ksp_type": "chebyshev",
     "ksp_chebyshev_kind": "fourth",
+    "esteig_ksp_view_eigenvalues": None,
     "pc_type": "python",
     "pc_python_type": "firedrake.ASMStarPC",
     "pc_star_construct_dim": 0,
@@ -219,11 +219,21 @@ if use_slate:
     }
 
 problem = LinearVariationalProblem(a, F, w, bcs=bcs)
-solver = LinearVariationalSolver(problem, solver_parameters=sparams, options_prefix="")
+solver = LinearVariationalSolver(problem, solver_parameters=sparams,
+                                 options_prefix="")
+solver.set_transfer_manager(transfer)
 
 print("dim(W) =", W.dim(), tuple(V.dim() for V in W))
 print("kappa =", float(kappa))
 solver.solve()
+
+
+ksp = solver.snes.ksp
+if use_slate:
+    ksp = ksp.pc.getPythonContext().condensed_ksp
+A = ksp.pc.getOperators()[0]
+if A.getSize()[0] <= 64:
+    A.view()
 
 uh = w.subfunctions[0]
 if len(W) == 3:
