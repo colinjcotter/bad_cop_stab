@@ -14,6 +14,7 @@ parser.add_argument('--no-slate', dest="slate", action="store_false", default=Tr
 parser.add_argument('--no-pressure', dest="pressure", action="store_false", default=True, help='eliminate pressure')
 parser.add_argument('--complex', action="store_true", default=False, help='use complex mode')
 parser.add_argument('--quadrilateral', action="store_true", default=False, help='use tensor-product cells')
+parser.add_argument('--mat_view', action="store_true", default=False, help='view matrix')
 parser.add_argument('--nx', type=int, default=10, help='elements along each side')
 parser.add_argument('--refine', type=int, default=0, help='level of refinement')
 parser.add_argument('--degree', type=int, default=1, help='degree')
@@ -22,6 +23,7 @@ args, _ = parser.parse_known_args()
 stab = args.stab
 pressure = args.pressure
 complex_mode = args.complex
+mat_view = args.mat_view
 use_mg = args.mg
 use_slate = args.slate
 dist_params = {"overlap_type": (DistributedMeshOverlapType.VERTEX, 1),}
@@ -133,6 +135,7 @@ a = (- inner(v, ikappa * u) * dx0
      + inner(q, ikappa * p) * dx1
      - inner(qhat, eta * phat) * ds1)
 
+
 if len(W) == 3:
     # usual divergence off-diagonal terms
     a += (inner(q, div(u)) + inner(div(v), p)) * dx1
@@ -159,19 +162,29 @@ g = zero(qhat.ufl_shape)
 
 x = SpatialCoordinate(mesh)
 omega = [Constant(2*pi, domain=mesh) for _ in x]
-p_exact = Constant(1 if complex_mode else [1,0], domain=mesh) * (x[0]*(1-x[0]) * x[1]*(1-x[1])/0.5**4)**2
+p_exact = Constant(1 if complex_mode else [1,0], domain=mesh) * (x[0]*(1-x[0]) * x[1]*(1-x[1])/0.5**4)
 
 u_exact = None
 # p_exact = None
+
 if p_exact:
     u_exact = (ikappa / kappa**2) * grad(p_exact)
     f = ikappa * p_exact + div(u_exact)
     g = eta * p_exact + dot(u_exact, n)
 
 if len(W) == 2:
+    uh = w.subfunctions[0]
+    ph_expr = (ikappa/kappa**2) * (div(uh) - f)
     f = j * f
 F = inner(q, f) * dx1 - inner(qhat, g) * ds1
 bcs = []
+
+rtol = 1E-8
+rhs = assemble(F, bcs=bcs)
+with rhs.dat.vec_ro as rvec:
+    l2norm = rvec.norm()
+atol = rtol * l2norm
+rtol = 0
 
 gmg = lambda coarse, levels: {
     "pc_type": "mg",
@@ -180,13 +193,16 @@ gmg = lambda coarse, levels: {
 }
 
 factor = lambda solver="petsc": {
-    "pc_type": "cholesky",
+    "pc_type": "lu",
     "pc_factor_mat_solver_type": solver,
 }
 
 levels = {
     "ksp_type": "chebyshev",
+    #"ksp_type": "richardson",
+    "ksp_richardson_scale": 1/3,
     "ksp_chebyshev_kind": "fourth",
+    "ksp_max_it": 1,
     "esteig_ksp_view_eigenvalues": None,
     "pc_type": "python",
     "pc_python_type": "firedrake.ASMStarPC",
@@ -203,18 +219,21 @@ sparams.update({
     "ksp_monitor": None,
     "ksp_view_eigenvalues": None,
     "ksp_type": "gmres",
+    "ksp_max_it": 90,
+    "ksp_rtol": rtol,
+    "ksp_atol": atol,
     "ksp_pc_side": "right",
     "ksp_norm_type": "unpreconditioned",
 })
 
 if use_slate:
+    #sparams.update({"element_inverse": True, "pc_type": "mat"})
     sparams = {
         "ksp_type": "preonly",
         "snes_monitor": None,
         "pc_type": "python",
         "mat_type": "matfree",
         "pc_python_type": "firedrake.SCPC",
-        "pc_sc_eliminate_fields": ",".join(map(str, range(len(W)-1))),
         "condensed_field": sparams,
     }
 
@@ -232,7 +251,7 @@ ksp = solver.snes.ksp
 if use_slate:
     ksp = ksp.pc.getPythonContext().condensed_ksp
 A = ksp.pc.getOperators()[0]
-if A.getSize()[0] <= 64:
+if mat_view:
     A.view()
 
 uh = w.subfunctions[0]
@@ -241,7 +260,7 @@ if len(W) == 3:
 else:
     Q = FunctionSpace(mesh, DG)
     ph = Function(Q, name="p")
-    ph.interpolate((ikappa*div(uh) - kappa*f)/kappa**2)
+    ph.interpolate(ph_expr)
 
 if p_exact:
     u_diff = uh - u_exact
