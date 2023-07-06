@@ -21,7 +21,7 @@ kappa = Constant(args.kappa)
 
 f = as_vector([Constant(1.0), Constant(0.0)])
 
-trace = False
+trace = True
 if trace:
     T = VectorFunctionSpace(mesh, "HDiv Trace", degree-1, dim=4)
     W = V * Q * T 
@@ -58,7 +58,7 @@ if trace:
         + inner(qhat('+'), jump(u, n))*dS
         + inner(qhat,dot(u, n))*ds
         - inner(dot(v('+'), n('+')) - vhat('+'), dot(u('+'), n('+')) - uhat('+'))/eta*dS
-        - inner(dot(v('-'), n('-')) + vhat('+'), dot(u('-'), n('-')) + uhat('+'))/eta*dS
+        - inner(dot(v('-'), n('-')) + vhat('-'), dot(u('-'), n('-')) + uhat('-'))/eta*dS
         - inner(dot(v, n) - vhat, dot(u, n) - uhat)/eta*ds
         + inner(qhat, phat)*ds
     )
@@ -154,7 +154,7 @@ def chop(A, tol=1E-10):
 #pp.colorbar()
 #pp.show()
 w = Function(W)
-solve(a==F, w, solver_parameters = starparams)
+solve(a==F, w, solver_parameters = hparams)
 
 if trace:
     u, p, tt = w.split()
